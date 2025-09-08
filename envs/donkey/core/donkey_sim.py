@@ -380,9 +380,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
             "track": self.current_track,
             "speed": self.speed,
             "pos": (self.pos_x, self.pos_z),
+            "rot": (self.rot_w, self.rot_x, self.rot_y, self.rot_z),
             "cte": self.cte,
             "cte_pid": self.cte_pid,
             "lateral_position": lateral_position,
+            "last_steering": self.last_steering,
+            "rgb" : self.image_array,
         }
         self.control_timer.on_frame()
         return observation, done, info
