@@ -104,6 +104,8 @@ class TcpAgent(Agent):
         steer_ctrl, throttle_ctrl, brake_ctrl, metadata = self.net.process_action(pred, next_command, gt_velocity, target_point)
         steer_pid, throttle_pid = self.pure_pursuit.predict(state=state)
         #steer_traj, throttle_traj, brake_traj, metadata_traj = self.net.control_pid(pred['pred_wp'], gt_velocity, target_point)
+        print("steering_ctrl = ", steer_ctrl)
+        print("steering_pid = ", steer_pid)
 
         status = 1
         if status == 0:
@@ -117,7 +119,16 @@ class TcpAgent(Agent):
             throttle = np.clip(alpha*throttle_pid + (1-alpha)*throttle_ctrl, 0, 0.75)
             #breaking = np.clip(alpha*brake_traj + (1-alpha)*brake_ctrl, 0, 1)
 
-        throttle = 0.1
+        if speed > 38:
+            speed_limit = 15  # slow down
+        else:
+            speed_limit = 38
+
+
+        throttle = np.clip(
+            a=1.0 - steer_ctrl**2 - (speed / speed_limit) ** 2, a_min=0.0, a_max=1.0
+        )
+
         if len(self.last_steers) >= 20:
             self.last_steers.popleft()
         self.last_steers.append(abs(float(steering)))
@@ -133,7 +144,7 @@ class TcpAgent(Agent):
         else:
             self.status = 0
 
-        return np.asarray([steering, throttle], dtype = np.float32)
+        return np.asarray([steer_ctrl, throttle], dtype = np.float32)
     
 
 
