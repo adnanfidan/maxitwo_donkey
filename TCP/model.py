@@ -91,7 +91,6 @@ class TCP(nn.Module):
             nn.Linear(256, 1),
         )
 
-        # ---- eski mu/sigma başları yerine aksiyon başı
         self.policy_head = nn.Sequential(
             nn.Linear(256, 256),
             nn.ReLU(inplace=True),
@@ -99,10 +98,8 @@ class TCP(nn.Module):
             nn.Dropout2d(p=0.5),
             nn.ReLU(inplace=True),
         )
-        # Aksiyon üretimi (2: acc_like, steer)
         self.action_head = nn.Linear(256, 2)
 
-        # ---- KONTROL GRU: input_size 256'ya indi (mu/sigma yok)
         self.decoder_ctrl = nn.GRUCell(input_size=256, hidden_size=256)
 
         self.output_ctrl = nn.Sequential(
@@ -112,7 +109,6 @@ class TCP(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        # self.dist_mu / self.dist_sigma KALDIRILDI
 
         self.decoder_traj = nn.GRUCell(input_size=4, hidden_size=256)
         self.output_traj = nn.Linear(256, 2)
@@ -167,7 +163,6 @@ class TCP(nn.Module):
         outputs['pred_value_ctrl'] = self.value_branch_ctrl(j_ctrl)
         outputs['pred_features_ctrl'] = j_ctrl
 
-        # ----- Kontrol döngüsü (mu/sigma yok)
         x = j_ctrl
         h = torch.zeros(size=(x.shape[0], 256), dtype=x.dtype).type_as(x)
 
@@ -175,7 +170,6 @@ class TCP(nn.Module):
         future_features = []
 
         for t in range(self.config.pred_len):
-            # artık sadece x'i besliyoruz
             h = self.decoder_ctrl(x, h)
 
             wp_att = self.wp_att(torch.cat([h, traj_hidden_state[:, t]], 1)).view(-1, 1, 8, 10)
@@ -185,30 +179,26 @@ class TCP(nn.Module):
             dx = self.output_ctrl(merged_feature)
             x = dx + x
 
-            # aksiyon üretimi (deterministik)
             policy_feat = self.policy_head(x)
             action_logits = self.action_head(policy_feat)          # [B,2]
-            action = torch.tanh(action_logits)                     # [-1,1] iki kanal
-            # channel 0: acc_like (-1..1), channel 1: steer (-1..1)
+            action = torch.tanh(action_logits)                     
 
             actions_seq.append(action)
             future_features.append(x)
 
-        outputs['actions_seq'] = actions_seq            # liste, [pred_len x (B,2)]
-        outputs['action'] = actions_seq[-1]             # son adım aksiyonu (B,2)
+        outputs['actions_seq'] = actions_seq            
+        outputs['action'] = actions_seq[-1]             
         outputs['future_feature'] = future_features
 
         return outputs
 
     def process_action(self, pred, command, speed, target_point):
-        """
-        Beklenen: pred['action'] ∈ [-1,1]^2, sırası [acc_like, steer]
-        """
+
         acc_like, steer = pred['action'][:, 0], pred['action'][:, 1]
 
         # acc_like >= 0 -> throttle, <0 -> brake
         throttle = torch.clamp(acc_like, min=0.0, max=1.0)
-        brake = torch.clamp(-acc_like, min=0.0, max=1.0)   # negatifse fren miktarı
+        brake = torch.clamp(-acc_like, min=0.0, max=1.0)
         steer = torch.clamp(steer, -1.0, 1.0)
 
         # tensörleri numpy/float'a çevir
