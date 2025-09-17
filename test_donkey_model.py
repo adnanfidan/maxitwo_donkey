@@ -525,7 +525,7 @@ if __name__ == "__main__":
 
                 model_action = tcp_model.predict(obs=obs, state=state_dict)
                 
-                print("Steering and Throttle = ", model_action)
+                #print("Steering and Throttle = ", model_action)
 
             if isinstance(model_action, torch.Tensor):
                 model_action = model_action.detach().cpu().numpy()

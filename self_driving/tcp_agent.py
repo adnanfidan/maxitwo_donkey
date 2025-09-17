@@ -101,23 +101,14 @@ class TcpAgent(Agent):
         pred = self.net(rgb, model_state, target_point)
         state["target_diff"] = pred["pred_wp"]
 
+
         steer_ctrl, throttle_ctrl, brake_ctrl, metadata = self.net.process_action(pred, next_command, gt_velocity, target_point)
         steer_pid, throttle_pid = self.pure_pursuit.predict(state=state)
-        #steer_traj, throttle_traj, brake_traj, metadata_traj = self.net.control_pid(pred['pred_wp'], gt_velocity, target_point)
-        print("steering_ctrl = ", steer_ctrl)
-        print("steering_pid = ", steer_pid)
-
-        status = 1
-        if status == 0:
-            alpha = 0.3
-            steering = np.clip(alpha*steer_ctrl + (1-alpha)*steer_pid, -1, 1)
-            throttle = np.clip(alpha*throttle_ctrl + (1-alpha)*throttle_pid, 0, 0.75)
-            #breaking = np.clip(alpha*brake_ctrl + (1-alpha)*brake_traj, 0, 1)
-        else:
-            alpha = 0.3
-            steering = np.clip(alpha*steer_pid + (1-alpha)*steer_ctrl, -1, 1)
-            throttle = np.clip(alpha*throttle_pid + (1-alpha)*throttle_ctrl, 0, 0.75)
-            #breaking = np.clip(alpha*brake_traj + (1-alpha)*brake_ctrl, 0, 1)
+        
+        alpha = 0.3
+        steering = np.clip(alpha*steer_pid + (1-alpha)*steer_ctrl, -1, 1)
+        throttle = np.clip(alpha*throttle_pid + (1-alpha)*throttle_ctrl, 0, 0.75)
+            
 
         if speed > 38:
             speed_limit = 15  # slow down
@@ -125,9 +116,7 @@ class TcpAgent(Agent):
             speed_limit = 38
 
 
-        throttle = np.clip(
-            a=1.0 - steer_ctrl**2 - (speed / speed_limit) ** 2, a_min=0.0, a_max=1.0
-        )
+        throttle = np.clip( a=1.0 - steering**2 - (speed / speed_limit) ** 2, a_min=0.0, a_max=1.0 ) / 2 
 
         if len(self.last_steers) >= 20:
             self.last_steers.popleft()
@@ -144,7 +133,9 @@ class TcpAgent(Agent):
         else:
             self.status = 0
 
-        return np.asarray([steer_ctrl, throttle], dtype = np.float32)
+        print("steering = ", steering, "throttle = ", throttle)
+
+        return np.asarray([steering, throttle], dtype = np.float32)
     
 
 
@@ -152,18 +143,15 @@ class PurePursuitContoller:
     def predict(self, state):
         curr_x, curr_y = state["pos"]
         rotation = state["rot"]
+        _, curr_angle, _ = self._calculate_angle_from_rotation(rotation=rotation)
+        
+        target = self.local_to_global(state["target_diff"].squeeze(0).detach().cpu().numpy(), curr_x, curr_y, curr_angle, 10)
 
-
-        target = state["target_diff"].squeeze(0).detach().cpu().numpy()
-
-        dx = target[0][0]
-        dy = target[0][1]
+        dx = target[0][0] - curr_x 
+        dy = target[0][1] - curr_y
         distance = math.sqrt((dx)**2 + (dy)**2)
 
-        _, curr_angle, _ = self._calculate_angle_from_rotation(rotation=rotation)
-        target_angle = math.atan2(dx, dy)
-        print("target_angle = ", target_angle)
-        print("current_angle = ", curr_angle)
+        target_angle = math.atan2(dy, dx)
 
         rad_diff = target_angle - curr_angle
         angle_diff = self.normalize_angle(rad_diff)
@@ -171,6 +159,21 @@ class PurePursuitContoller:
         steering = max(-1.0 , min(1.0, angle_diff))
 
         return steering, distance/10
+    
+
+    def local_to_global(self, local_wp, ego_x, ego_y, ego_theta, scale=10.0):
+        R = np.array([
+            [np.cos(np.pi/2 + ego_theta), -np.sin(np.pi/2 + ego_theta)],
+            [np.sin(np.pi/2 + ego_theta),  np.cos(np.pi/2 + ego_theta)]
+        ])
+        local_wp = np.array(local_wp) * scale
+        global_wps = []
+        for p in local_wp:
+            p = R.dot(p)
+            gx = p[1] + ego_x
+            gy = p[0] + ego_y
+            global_wps.append([gx, gy])
+        return np.array(global_wps, dtype=np.float32)
 
     
     def _calculate_angle_from_rotation(self, rotation):
